@@ -3,7 +3,7 @@ pull_request_rules:
     conditions:
       - approved-reviews-by=@fedora-infra/data-team
       - check-success=Checks
-      - check-success=Licenses(models)
+      - check-success=Licenses
       - check-success=Licenses(consumer)
       - check-success=Licenses(commands)
       - check-success=Unit tests(3.7, models)
