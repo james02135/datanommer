@@ -36,11 +36,17 @@ psutil = "^5.8.0"
 liccheck = "^0.6.0"
 pytest-cov = "^2.12.1"
 <<<<<<< HEAD
+<<<<<<< HEAD
 pytest-mock = "^3.6.1"
 pytest-postgresql = "^3.1.1"
 psycopg2 = "^2.9.1"
 =======
 >>>>>>> 23cd9b6 (Add coverage to pytest)
+=======
+pytest-mock = "^3.6.1"
+pytest-postgresql = "^3.1.1"
+psycopg2 = "^2.9.1"
+>>>>>>> 9c0be93 (Adjust unit tests)
 
 [tool.poetry.plugins."moksha.consumer"]
 "noms" = "datanommer.consumer:Nommer"
