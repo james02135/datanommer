@@ -433,5 +433,5 @@ class TestModels(unittest.TestCase):
             "foo",
         )
     
-    # def test_Mergify_if_unit_test_fails(self):
-    #     assert False
+    def test_Mergify_if_unit_test_fails(self):
+        assert False
