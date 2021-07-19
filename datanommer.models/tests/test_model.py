@@ -423,6 +423,7 @@ class TestModels(unittest.TestCase):
             "foo",
         )
 
+
   def test_add_empty(datanommer_models):
       with pytest.raises(KeyError):
           add(dict())
