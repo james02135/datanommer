@@ -15,22 +15,13 @@
 # with this program.  If not, see <http://www.gnu.org/licenses/>.
 import copy
 import datetime
-import pprint
-import unittest
-from unittest.mock import patch
 
 import pytest
 import sqlalchemy
 import sqlalchemy.exc
-from sqlalchemy.orm import scoped_session
 
-import datanommer.models
+from datanommer.models import add, Message, session
 
-
-# Set this to false to use a local postgres instance
-USE_SQLITE = True  # False
-
-filename = ":memory:"
 
 scm_message = {
     "body": {
@@ -161,7 +152,6 @@ umb_message = {
         },
     },
 }
-
 
 class TestModels(unittest.TestCase):
     @classmethod
@@ -433,5 +423,236 @@ class TestModels(unittest.TestCase):
             "foo",
         )
 
-    # def test_Mergify_if_unit_test_fails(self):
-    #     assert 1 == 2
+  def test_add_empty(datanommer_models):
+      with pytest.raises(KeyError):
+          add(dict())
+
+
+  def test_add_missing_i(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      del msg["body"]["i"]
+      add(msg)
+      dbmsg = Message.query.first()
+      assert dbmsg.i == 0
+
+
+  def test_add_missing_timestamp(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      del msg["body"]["timestamp"]
+      add(msg)
+      dbmsg = Message.query.first()
+      timediff = datetime.datetime.utcnow() - dbmsg.timestamp
+      # 10 seconds between adding the message and checking
+      # the timestamp should be more than enough.
+      assert timediff < datetime.timedelta(seconds=10)
+
+
+  def test_add_missing_msg_id_with_timestamp(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      dbmsg = Message.query.first()
+      assert dbmsg.msg_id.startswith("2012-")
+
+
+  def test_add_missing_msg_id_no_timestamp(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      del msg["body"]["timestamp"]
+      add(msg)
+      dbmsg = Message.query.first()
+      year = datetime.datetime.now().year
+      assert dbmsg.msg_id.startswith(str(year) + "-")
+
+
+  def test_extract_base_username(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      dbmsg = Message.query.first()
+      assert dbmsg.__json__()["username"] == msg["body"]["username"]
+      assert dbmsg.__json__()["crypto"] is None
+
+      
+  def test_extract_crypto_type(datanommer_models):
+      msg = copy.deepcopy(github_message)
+      add(msg)
+      dbmsg = Message.query.first()
+      assert dbmsg.__json__()["username"] is None
+      assert dbmsg.__json__()["crypto"] == "x509"
+
+
+  def test_add_many_and_count_statements(datanommer_models):
+      statements = []
+
+      def track(conn, cursor, statement, param, ctx, many):
+          statements.append(statement)
+
+      engine = session.get_bind()
+      sqlalchemy.event.listen(engine, "before_cursor_execute", track)
+
+      msg = copy.deepcopy(scm_message)
+
+      # Add it to the db and check how many queries we made
+      add(msg)
+      assert len(statements) == 1
+
+      # Add it again and check again
+      add(msg)
+      assert len(statements) == 2
+
+
+  def test_add_missing_cert(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      del msg["body"]["certificate"]
+      add(msg)
+
+
+  def test_add_and_check_for_others(datanommer_models):
+      def _count_array_attr(name):
+          return Message.get_array(name).count()
+
+      # There are no users or packages at the start
+      assert _count_array_attr("users") == 0
+      assert _count_array_attr("packages") == 0
+
+      # Then add a message
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+
+      # There should now be one of each
+      assert _count_array_attr("users") == 1
+      assert _count_array_attr("packages") == 1
+
+      # If we add it again, there should be no duplicates
+      msg["body"]["msg"]["msg_id"] = "foobar2"
+      add(msg)
+      assert _count_array_attr("users") == 1
+      assert _count_array_attr("packages") == 1
+
+      # Add a new username
+      msg = copy.deepcopy(scm_message)
+      msg["body"]["msg"]["commit"]["username"] = "ralph"
+      msg["body"]["msg"]["msg_id"] = "foobar3"
+      add(msg)
+      assert _count_array_attr("users") == 2
+      assert _count_array_attr("packages") == 1
+
+      # Add a message with no username
+      msg = copy.deepcopy(scm_message)
+      msg["body"]["msg"]["commit"]["username"] = None
+      msg["body"]["msg"]["msg_id"] = "foobar4"
+      add(msg)
+      assert _count_array_attr("users") == 2
+      assert _count_array_attr("packages") == 1
+
+
+  def test_add_nothing(datanommer_models):
+      assert Message.query.count() == 0
+
+
+  def test_add_and_check(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      session.flush()
+      assert Message.query.count() == 1
+
+
+  def test_categories(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      session.flush()
+      obj = Message.query.first()
+      assert obj.category == "git"
+
+
+  def test_categories_with_umb(datanommer_models):
+      msg = copy.deepcopy(umb_message)
+      add(msg)
+      session.flush()
+      obj = Message.query.first()
+      assert obj.category == "brew"
+
+
+  def test_grep_all(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      session.flush()
+      t, p, r = Message.grep()
+      assert t == 1
+      assert p == 1
+      assert len(r) == 1
+      assert r[0].msg == scm_message["body"]["msg"]
+
+
+  def test_grep_category(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      session.flush()
+      t, p, r = Message.grep(categories=["git"])
+      assert t == 1
+      assert p == 1
+      assert len(r) == 1
+      assert r[0].msg == scm_message["body"]["msg"]
+
+
+  def test_grep_not_category(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      session.flush()
+      t, p, r = Message.grep(not_categories=["git"])
+      assert t == 0
+      assert p == 0
+      assert len(r) == 0
+
+
+  def test_add_with_close_category(datanommer_models):
+      msg = copy.deepcopy(github_message)
+      add(msg)
+      session.flush()
+      t, p, r = Message.grep(categories=["github"])
+      assert t == 1
+      assert p == 1
+      assert len(r) == 1
+      assert r[0].msg_id == "2014-6552feeb-6dd9-4c39-9839-2c35f0a0f498"
+
+
+  def test_timezone_awareness(datanommer_models):
+      msg = copy.deepcopy(github_message)
+      add(msg)
+      session.flush()
+
+      queried = Message.query.one()
+
+      t = queried.timestamp
+      assert t == datetime.datetime(2014, 6, 18, 21, 32, 44)
+
+
+  def test_add_no_headers(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      add(msg)
+      dbmsg = Message.query.first()
+      assert dbmsg.headers == {}
+
+
+  def test_add_headers(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      msg["headers"] = {"foo": "bar", "baz": 1, "wibble": ["zork", "zap"]}
+      add(msg)
+      dbmsg = Message.query.first()
+      assert dbmsg.headers == msg["headers"]
+
+
+  def test_add_headers_message_id(datanommer_models):
+      msg = copy.deepcopy(scm_message)
+      msg["headers"] = {"message-id": "abc123"}
+      add(msg)
+      dbmsg = Message.query.first()
+      assert dbmsg.msg_id == "abc123"
+
+
+  def test_add_duplicate(datanommer_models):
+      # use the github message because it has a msg_id
+      msg = copy.deepcopy(github_message)
+      add(msg)
+      add(msg)
+      # if no exception was thrown, then we successfully ignored the          
+      # duplicate message
+      assert Message.query.count() == 1
